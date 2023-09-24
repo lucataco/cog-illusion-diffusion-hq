@@ -1,15 +1,36 @@
-from typing import List
+# Prediction interface for Cog ⚙️
+# https://github.com/replicate/cog/blob/main/docs/python.md
 
-from PIL.Image import LANCZOS
-from PIL import Image
-import qrcode
-import torch
 from cog import BasePredictor, Input, Path
-from diffusers import StableDiffusionControlNetPipeline, EulerDiscreteScheduler
+import os
+import torch
+import qrcode
+import random
+from PIL import Image
+from typing import List
+from PIL.Image import LANCZOS
+from diffusers import (
+    DiffusionPipeline,
+    AutoencoderKL,
+    StableDiffusionControlNetPipeline,
+    ControlNetModel,
+    StableDiffusionLatentUpscalePipeline,
+    StableDiffusionImg2ImgPipeline,
+    StableDiffusionControlNetImg2ImgPipeline,
+    DPMSolverMultistepScheduler,
+    EulerDiscreteScheduler
+)
 
+BASE_MODEL = "SG161222/Realistic_Vision_V5.1_noVAE"
+BASE_CACHE = "model-cache"
+CONTROL_CACHE = "control-cache"
+VAE_CACHE = "vae-cache"
+IMG_CACHE = "img-cache"
 
-CACHE_DIR = "hf-cache"
-
+SAMPLER_MAP = {
+    "DPM++ Karras SDE": lambda config: DPMSolverMultistepScheduler.from_config(config, use_karras=True, algorithm_type="sde-dpmsolver++"),
+    "Euler": lambda config: EulerDiscreteScheduler.from_config(config),
+}
 
 def resize_for_condition_image(input_image, width, height):
     input_image = input_image.convert("RGB")
@@ -22,18 +43,27 @@ def resize_for_condition_image(input_image, width, height):
     img = input_image.resize((W, H), resample=LANCZOS)
     return img
 
-
 class Predictor(BasePredictor):
-    def setup(self):
+    def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
-        # torch.backends.cuda.matmul.allow_tf32 = True
-        self.pipe = StableDiffusionControlNetPipeline.from_pretrained(
-            CACHE_DIR, torch_dtype=torch.float16
-        ).to("cuda")
-        self.pipe.scheduler = EulerDiscreteScheduler.from_config(
-            self.pipe.scheduler.config
+        self.vae = AutoencoderKL.from_pretrained(
+            "stabilityai/sd-vae-ft-mse",
+            torch_dtype=torch.float16,
+            cache_dir=VAE_CACHE,
         )
-        self.pipe.enable_xformers_memory_efficient_attention()
+        self.controlnet = ControlNetModel.from_pretrained(
+            "monster-labs/control_v1p_sd15_qrcode_monster",
+            torch_dtype=torch.float16,
+            cache_dir=CONTROL_CACHE,
+        )
+        self.pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            BASE_MODEL,
+            controlnet=self.controlnet,
+            vae=self.vae,
+            safety_checker=None,
+            torch_dtype=torch.float16,
+            cache_dir=BASE_CACHE,
+        ).to("cuda")
 
     def generate_qrcode(self, qr_code_content, background, border, width, height):
         print("Generating QR Code from content")
@@ -50,12 +80,12 @@ class Predictor(BasePredictor):
         qrcode_image = resize_for_condition_image(qrcode_image, width, height)
         return qrcode_image
 
-    # Define the arguments and types the model takes as input
     def predict(
         self,
         prompt: str = Input(description="The prompt to guide QR Code generation."),
         qr_code_content: str = Input(
-            description="The website/content your QR Code will point to."
+            description="The website/content your QR Code will point to.",
+            default=None
         ),
         negative_prompt: str = Input(
             description="The negative prompt to guide image generation.",
@@ -84,7 +114,7 @@ class Predictor(BasePredictor):
             description="The outputs of the controlnet are multiplied by `controlnet_conditioning_scale` before they are added to the residual in the original unet.",
             ge=0.0,
             le=4.0,
-            default=2.2,
+            default=1.0,
         ),
         border: int = Input(description="QR code border size", ge=0, le=4, default=1),
         qrcode_background: str = Input(
@@ -94,6 +124,7 @@ class Predictor(BasePredictor):
         ),
     ) -> List[Path]:
         seed = torch.randint(0, 2**32, (1,)).item() if seed == -1 else seed
+        print(f"Seed: {seed}")
         if image is None:
             if qrcode_background == "gray":
                 qrcode_background = "#808080"
@@ -116,8 +147,9 @@ class Predictor(BasePredictor):
 
         outputs = []
         for i, image in enumerate(out.images):
-            fname = f"output-{i}.png"
+            fname = f"/tmp/output-{i}.png"
             image.save(fname)
             outputs.append(Path(fname))
 
         return outputs
+

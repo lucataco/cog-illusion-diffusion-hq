@@ -1,4 +1,4 @@
-# cog-qrcode
+# cog-illusion-diffusion-hq
 
 [![Replicate](https://replicate.com/andreasjansson/qrcode/badge)](https://replicate.com/andreasjansson/qrcode)
 
@@ -10,4 +10,7 @@ First, download the pre-trained weights:
 
 Then, you can run predictions:
 
-    cog predict -i prompt="..." -i image=@...
+    cog predict -i prompt="(masterpiece:1.4), (best quality), (detailed), Medieval village scene with busy streets and castle in the distance" -i image=@spiral.png
+
+Output:
+![Stable diffusion](output.png)

@@ -1,5 +1,9 @@
+# Configuration for Cog
+
 build:
+  # set to true if your model requires a GPU
   gpu: true
+  cuda: "11.8"
   python_version: "3.10"
   python_packages:
     - "diffusers==0.21.1"
@@ -11,4 +15,6 @@ build:
     - "qrcode==7.4.2"
     - "xformers==0.0.21"
 
+
+# predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
